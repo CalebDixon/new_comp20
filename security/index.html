@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+        <meta charset="utf-8" />
+        <title>Security</title>
+        <link rel="stylesheet" href="style.css" type="text/css" />
+</head>
+
+<body>
+        <h1>Security and Privacy Assessment of Server-vuln.js</h1>
+
+        <h2>Introduction</h2>
+        <div id="into">
+        <p>
+                The server-vuln.js web server provides the service of storing usernames with associated latitude and longitude values. It has a few routes related to this task. First, it provides a browser-friendly interface for submitting data via the form fillable <strong>/entry.html</strong> document. Second, it provides a <strong>/</strong> default route that shows all of the submitted data for all users. Third, it provides a POST route <strong>/sendLocation</strong> that can be used by other programs to send data to the server. Lastly, it provides a <strong>/checkins.json</strong> document that requires a login query string to look at only the data provided by one user. 
+        </p>
+
+        <p>
+                My goal in this assessment was to identify security flaws in the program as it is written. Currently, the server provides multiple ways of viewing all data for all users. This is a fundmental flaw in the security of the program, and nothing on the server should really be considered private data at this point. There are other issues with the server however, including both an unintentional path to accessing that data through database injection, and the potential for the insertion of malicious code into other user sessions.
+        </p>   
+        </div>
+
+        <h2>Methodology</h2>
+        <div id="methods">
+        <p>
+                I began testing the program using only the provided webpages with no knowledge of server code. I attempted to use the application Burp, but was unable to successfully run the program (due to some issues with security certificates I was unable to resolve). Even without the use of the tool, I was able to find some issues with the code. Afterwards, I read the server code and tested for further issues based on this knowledge. During both phases, I used a web browser and the curl browser command to acess the website, and no other tools (except for the breif and unhelpful Burp scan, none of the results of which were used to identify any security issues). 
+        </p>
+        </div>
+
+        <h2>Abstract</h2>
+        <div id="abstract">
+        <p>
+                The program in its current version makes no attempt at securing user data, providing it readily on its main page. The first step in securing user data is removing this feature. As the server is currently written, there is ample opportunity for users to access server data both through the intentionally provided channels, and through vulnerabilities in the database code. There is also opportunity for a malicious user to insert his own code into the pages the server provides (through Cross Site Scripting) and have users run any, potentially malicious, script of his choosing. Both of these are serious issues in a webpage and should be fixed before the page begins to see use.
+        </p>
+        </div>
+
+        <h2>Issues Found</h2>
+        <div id="issues">
+        <p>
+                <strong>(1)</strong> Cross site scripting through the /sendLocation route
+        </p>
+        <p>
+                This is a high priority issue that allows a malicious user to run arbitary code in other user sessions, and is a serious security concern. 
+        </p>
+        <p>
+                The /sendLocation route is provided to allow a user to submit data to the server with a basic POST request. Some basic verification takes place checking that the latitude and longitude values are numbers in the correct range, but no such verification occurs with the username. This means that a user could store anything in that field, which will later be provided in a webpage later. For example, take the following command: 
+        </p>
+        <p>
+                curl -d '{"login" : "<script>window.location=\"https://xkcd.com/1808\"</script>", "lat" : "0", "lng" : "0"}' -H "Content-Type: application/json" https://jordan-marsh.herokuapp.com/sendLocation
+        </p>
+        <p>
+                This is just a link to a comic that happens to be titled "Hacking", but it could be just about anything. After this runs, any time a user acesses the main page of the website, they will be redirected to the new page. A more malicious example could run a script in the background of the page that doesn't have an visible effect, but collects user data and sends it to another server.  
+        </p>
+        <p>
+                The simplest solution, funnily enough, is actually very similar to the comic that was linked as an example. Characters like "<" and ">" need to be replaced by their HTML encoded version so they will not be treated as runable code. The following script is a good example of this:
+        </p>
+        <p>
+
+<p></p>function convert(str)
+<p></p>{
+  <p></p>str = str.replace(/&/g, "& amp;");
+  <p></p>str = str.replace(/>/g, "& gt;");
+  <p></p>str = str.replace(/<\/g, "& lt;");
+  <p></p>str = str.replace(/"/g, "& quot;");
+  <p></p>str = str.replace(/'/g, "& #039;");
+  <p></p>return str;
+<p></p>}
+        </p>
+        <p>
+                (the spaces between "&" and "amp" were added because it othewises appears as an &. The same goes for the other lines below it, the spaces should be removed when the code is run, but I have no idea how to actually show that string in a webpage). Running this function on each user input in the login field would prevent the possibility of cross site scripting. Specifically, including this function definition anywhere in the script, then running "login = convert(login);" after line 59 would suffice.
+        </p>
+         <p>
+                <strong>(2)</strong> Cross site scripting through the /submit route
+        </p>
+        <p>
+                This vulerability is very similar to the above, and equally high in priority. It allows a user to do the same thing: run an arbitrary script on another user's computer, in much the same way. The command a user might use to do this would only differ by a few characters, something like: 
+        </p>
+        <p>
+                curl -d '{"login" : "<script>window.location=\"https://xkcd.com/1808\"</script>", "lat" : "0", "lng" : "0"}' -H "Content-Type: application/json" https://jordan-marsh.herokuapp.com/<strong>sendLocation</strong>
+        </p>
+        <p>
+                The /submit route was likely not intended to be acessed by users in this fashion, that is not through the entry.html webpage (which only allows 10 character usernames), but it is nonetheless possible and a security flaw. Luckily, the solution is also the same as for the other route, it just needs to be implemented here as well as /sendLocation. Running "login = convert(login);" after line 24 would fix this issue for this route.
+        </p>
+        <p>
+              <strong>(3)</strong> Mongo Database Injection in the /checkins.json rotute  
+        </p>
+        <p>
+                This is currently a low priority issue because there is no data in the server that cannot already be accessed by the user through the main page. Database injection in general is a serious issue because it allows users to view data they should not normally have access to. 
+        </p>
+        <p>
+                The current server allows all user data to be visible to all other users. If this were not the case, it would be a major issue that the way the database is acessed has potential to allows a query that can see all of the data it contains. The problematic section is line 104 of the server code: 
+        </p>
+        <p>
+                collection.find({login:loginEntry}).toArray(function(error, results)
+        </p>
+        <p>
+                if the user were to make the login field "[$gt]=", it would find every entry in the database. An example of this can be seen by viewing this URL: https://jordan-marsh.herokuapp.com/checkins.json?login[$gt]=
+        <p>
+                This data is so strange, chrome mistook it for <a href = "https://i.imgur.com/gd3CMfM.png"> Maltese</a>,
+                but it is still user data, and should not be so easily accessed in this form.
+        </p>
+        <p>
+                Preventing database injection difficult. A library like Joi designed for data validation may be helpful to solve this problem. This library can be seen <a href="https://github.com/hapijs/joi"> here</a>, and an article detailing injection in Mongo <a href="https://blog.sqreen.io/prevent-nosql-injections-mongodb-node-js/"> here</a>.
+        </p>
+        </div>
+
+        <h2>Conclusion</h2>
+        <p>
+                In its current state, this website is both insecure in its data handling and very easily compromised to run malicious code. 
+        </p>
+        <p>
+                Fixing the data handling should start with not publishing the data on the main page of the site. Requiring a password for users would be a good step in creating some security. Allowing users to choose if their post should be made public and storing that data (probably by adding a "public" field to the database entries that is true or false) would be another potential step in creating a version of the site that is conscious of the security of the data, so it can handle different data in different ways. The issue of database injection is a more complicated issue to solve, but can be done with some effort and a clear definition of what an acceptable query for a user to have for the database is.
+        </p>
+        <p>
+                The issue of cross site scripting is significant but also easily fixed. The function described earlier in the Issues section can prevent most issues with malicious scripting with only a few added lines. 
+        </p>
+        <div id="conclusion"></div>
+
+
+</body>
+
+</html>
+
